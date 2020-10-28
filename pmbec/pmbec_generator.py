@@ -11,13 +11,46 @@ from pathlib import Path
 import os
 
 class pmbec_generator():
+    '''
+    Class has the ability to create Peptide to MHC Binding Energy Covariance (PMBEC)
+    matrices, perform analysis with them, export them, and create plots with them. 
+    PMBEC matrices are useful because they can be used as scoring matrices in peptide 
+    to MHC binding algorithms. 
+
+    :Example usage:
+    import pmbec_generator
+
+    pm = pmbec_generator(job_id='pmbec_matrix', threshold=.05)
+    raw_data = pm.get_raw_data("raw_data_file",
+                'Residue',
+                'Position',
+                nrows=49,
+                sep=',')
+    pm.filter_raw_data(raw_data, consolidate=True, positions={2,9}, skip_alleles='2ME')
+    energy_contribution = pm.calculate_energy_contribution()
+    cov_matrix = pm.covariance()
+    clustered = pm.cluster_matrix(cov_matrix)
+    pm.write_excel(clustered)
+
+    '''
     def __init__(self, threshold=0.05, job_id='pmbec'):
+        '''
+        constructor for pmbec matrix generator
+
+        :param: threshold - float - this threshold will be used to color PMBEC matrices later
+                job_id - str - default 'pmbec' - This is a job id label for creating directories where
+                                                    intermediate files will be stored, along with the final matrix
+        '''
         if not isinstance(job_id, str):
             raise Exception("job_id must be a string, it will be used as a directory to write intermediate files and covariance matrices to")
         if not isinstance(threshold, float):
             raise Exception("threshold must be a float, and will be used as a metric to color the final matrix")
         self.job_id = job_id
         self.threshold = threshold
+        self.filtered = False
+        self.pmbec_matrix = None
+        self.energy_constribution_file = None
+        self.raw_data_file = None
 
     def load_true_matrix(self, true_matrix_file='./true_matrix/covariance_matrix.mat', sep=' '):
         index = "A C D E F G H I K L M N P Q R S T V W Y"
@@ -130,6 +163,18 @@ class pmbec_generator():
         return data_structure
         
     def consolidate_dataset(self, all_raw_data, residues=set(['C']), consolidate_on='2ME',pos=set([2,9])):
+        '''
+        consolidation function that takes raw data dictionary of <residues<positions<MHC:IC50>>> and
+        consolidates a 'new' in-silico residue based on whatever parameter is passed in with 'consolidate_on'.
+        This means that if a user has experimental conditions marked in their binding assays that they want to capture in the covariance
+        matrix, they can do so. 
+
+        :param: all_raw_data - Dict(<str<int<str:float>>>) - raw data containing <Residues<positions<MHC alleles : IC50 values>>>
+                residues - Set<str> - a set of residues that will be used to create the new in silico residue
+                consolidate_on - str - a string that marks what experimental condition in the binding assay is going to be captured
+                pos - List<int> - a list of positions to check for experimental conditions
+        :return: raw_data - Dict(<str<int<str:float>>>) - a raw data dictionary with the new consolidated residue
+        '''
         raw_data = all_raw_data
         for r in residues:
             r_prime = r + " \'"
@@ -166,11 +211,11 @@ class pmbec_generator():
                     *args,
                     **kwargs
                     ):
-        if consolidate:
+        if consolidate: # check to consolidate any parameters in raw data
             raw_data_dict = self.consolidate_dataset(raw_data_dict)
-        if len(skip_residues) > 0:
+        if len(skip_residues) > 0: # check to see if any residues are being filtered out
             raw_data_dict = self.remove_skip_residues(raw_data_dict, skip_residues)
-        if skip_alleles:
+        if skip_alleles: # filter out any alleles
             new_rd = {}
             new_rd = defaultdict()
             for r in raw_data_dict.keys():
@@ -184,7 +229,7 @@ class pmbec_generator():
                             if allele in self.mhcs:
                                 self.mhcs.remove(allele)
             raw_data_dict = new_rd
-        if len(positions) > 0:
+        if len(positions) > 0: #filter out any positions
             self.number_positions = len(positions)
             new_rd = {}
             for r in raw_data_dict.keys():
@@ -198,20 +243,31 @@ class pmbec_generator():
         else:
             self.number_positions = 9
         self.raw_data = raw_data_dict
-        self.raw_data_file = os.getcwd() + '/' + self.job_id + '/' + self.job_id + '_raw_data.csv'
+        self.raw_data_file = os.getcwd() + '/' + self.job_id + '/' + self.job_id + '_filtered_raw_data.csv'
         self.write_intermediate_file(self.raw_data, self.raw_data_file)
+        self.filtered = True
 
-    '''
-    new method, simpler, need to pass into filter_raw_data
-    '''
     def get_raw_data(self, 
                     raw_data_file, 
                     residue_column_string, 
                     position_column_string,
                     nrows=180,
                     sep="\t",
+                    write_unfiltered=True,
                     *args,
                     **kwargs):
+        '''
+        This method simply takes in a raw data file and loads it into a series of dictionaries to perform downstream
+        analysis on. This function assumes that the raw data file has columns structured in this order [peptide, sequence, residues, positions, all MHC molecules].
+        Essentially it assumes that after the position column in the raw data there is only binding information for MHC molecules. 
+
+        :param: residue_column_string - str - the name of the column in the raw data file that contains all the residues present in binding experiments
+                position_column_string - str - the name of the column that contains positions of the residues
+                nrows - int - default 180 -  number of rows in the dataset that contain useful information
+                sep - str - default is tab seperated - how the raw data file is delimited, examples: tabs, spaces, commas
+                wrtie_unfiltered - bool - default True - writes unfiltered data to the job id directory for debugging purposes if necessary
+        :return: unfiltered nested raw data dictionary of types <str<int<str:float>>> in explicit terms <residue<positions<MHC molecules : IC50>>>
+        '''
         raw_data = pd.read_csv(raw_data_file, sep=sep, nrows=nrows)
         residues = set(raw_data[residue_column_string].tolist())
         position_index = raw_data.columns.get_loc(position_column_string) #assumption is alleles come after position column
@@ -235,6 +291,10 @@ class pmbec_generator():
         self.mhcs = mhcs
         self.residues = residues
         self.raw_data = raw_data_dict
+        self.filtered = False
+        self.raw_data_file = os.getcwd() + '/' + self.job_id + '/' + self.job_id + '_unfiltered_raw_data.csv'
+        if write_unfiltered:
+            self.write_intermediate_file(self.raw_data, self.raw_data_file)
         return raw_data_dict
 
     def get_ic50(self, aa, pos, MHC, raw_data_dict):
@@ -280,10 +340,28 @@ class pmbec_generator():
         return log_ic50 - self.normalized_energy_contribution_sum(aa, pos, MHC, raw_data_dict)
     
     def calculate_energy_contribution(self, raw_data=None):
-        if not self.raw_data_file:
-            raise Exception("Must filter raw data before calculating energy contribution")
+        '''
+        function calculates the relative energy contribution for each residue found in the raw data.
+        it then writes this analysis to an intermediate file. After computing the energy contribution
+        for each residue, position, and allele, a user can calculate the covariance. This function assumes
+        that get_raw_data() has been called. If a user wants special filtering done to the raw data they should call
+        filter_data() with the parameters wanted. If it is not called the energy contribution will be calculated with
+        the raw data as is. There is a parameter for raw_data to be calculated if a user does not want to read in the raw_data.
+        
+        :param: raw_data - dict<str<int<str : float>>>) -  default None - if a user does not want the filtered raw data to be calculated on
+                                                                          they can pass in a dictionary of <residue<position<MHC alleles : IC50>>>
+        
+        :return: energy contribution dictonary of <str<int<str : float>>> or in other words <residue<position<MHC alleles : relative binding affinity>>>
+        '''
+        # if not self.raw_data_file:
+        #     raise Exception("Must filter raw data before calculating energy contribution")
         if not raw_data:
+            if not self.raw_data_file:
+                raise Exception("must first read in and filter raw data before calculating energy contribution")
             raw_data_dict = self.read_intermediate_file(self.raw_data_file)
+            if not self.filtered:
+                print('WARNING: calculating energy contribution on unfiltered raw data, filtered_raw_data.csv will be the same as unfiltered_raw_data.csv')
+                self.filter_raw_data(raw_data_dict)
         else:
             raw_data_dict = raw_data
         energy_contribution_dict = defaultdict(dict)
@@ -356,11 +434,36 @@ class pmbec_generator():
         else:
             raise Exception("pass in a file name or matrix to write")
 
-    def query_pmbec_matrix(self, row, column):
-        #if not self.pmbec_matrix:
-            #raise Exception("must create the pmbec matrix through the following steps:\nget raw data\n--> filter raw data\n-----> calculate energy contribution\n---------> calculate covariance and cluster")
-        return self.pmbec_matrix.loc[row, column]
+    def query_pmbec_matrix(self, row_amino_acid, column_amino_acid):
+        '''
+        function indexes the PMBEC matrix by two amino acids to get the pairs' binding energy covariance value.
+
+        :param: row_amino_acid - str - amino acid to index the row of the PMBEC matrix
+                column_amino_acid - str - amino acid to index the column of the PMBEC matrix
     
-    def rename_residue(self, old_name, new_name):
-        self.pmbec_matrix = self.pmbec_matrix.rename(columns={old_name: new_name}, index={old_name: new_name})
+        :return: a float representing the covariance value of the pair
+        '''
+        if not self.pmbec_matrix:
+            raise Exception('call covariance() to create the PMBEC matrix before you query a matrix')
+        if not isinstance(row_amino_acid, str) or not isinstance(column_amino_acid, str):
+            raise Exception("row_amino_acid and column_amino_acid need to be strings")
+        if row_amino_acid in list(self.pmbec_matrix.index) and column_amino_acid in list(self.pmbec_matrix.columns):
+            return self.pmbec_matrix.loc[row_amino_acid, column_amino_acid]
+        else:
+            if row_amino_acid not in list(self.pmbec_matrix.index):
+                raise Exception(row_amino_acid + ' was not found in any row')
+            if column_amino_acid not in list(self.pmbec_matrix.columns):
+                raise Exception(column_amino_acid + ' was not found in any column')
+    
+    def rename_residue(self, old_residue, new_residue):
+        '''
+        function renames a column and row (index) of the pmbec matrix.
+
+        :param: old_residue - str - the old row and column name of the residue
+                new_residue - str - the new row and column name of the residue
+        :return: covariance matrix dataframe with a renamed residue
+        '''
+        if not self.pmbec_matrix:
+            raise Exception('create a PMBEC matrix before trying to rename residues')
+        self.pmbec_matrix = self.pmbec_matrix.rename(columns={old_residue: new_residue}, index={old_residue: new_residue})
         return self.pmbec_matrix
