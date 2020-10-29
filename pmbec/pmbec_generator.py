@@ -26,7 +26,12 @@ class pmbec_generator():
                 'Position',
                 nrows=49,
                 sep=',')
-    pm.filter_raw_data(raw_data, consolidate=True, positions={2,9}, skip_alleles='2ME')
+    pm.filter_raw_data(raw_data,
+                       consolidate=True,
+                       consolidate_on='2ME',
+                       positions={2,9},
+                       residues_to_consolidate=set(['C']),
+                       skip_alleles='2ME')
     energy_contribution = pm.calculate_energy_contribution()
     cov_matrix = pm.covariance()
     clustered = pm.cluster_matrix(cov_matrix)
@@ -49,7 +54,7 @@ class pmbec_generator():
         self.threshold = threshold
         self.filtered = False
         self.pmbec_matrix = None
-        self.energy_constribution_file = None
+        self.energy_contribution_file = None
         self.raw_data_file = None
 
     def load_true_matrix(self, true_matrix_file='./true_matrix/covariance_matrix.mat', sep=' '):
@@ -204,31 +209,40 @@ class pmbec_generator():
 
     def filter_raw_data(self,
                     raw_data_dict,
-                    consolidate=False, 
+                    consolidate=False,
+                    residues_to_consolidate=set(),
+                    consolidate_on=None,
                     skip_residues=set(),
                     skip_alleles=None,
                     positions=set(),
                     *args,
                     **kwargs
                     ):
+        '''
+        Function filters raw data before analysis begins. It allows a user to consolidate parameters
+        found in the raw data in an in-silico amino acid so the parameters effect can be seen in the PMBEC
+        matrix. For instance, all alleles could be treated with 2ME in the raw data, and 2ME prevents cysteine
+        from oxidizing. To capture the effect of 2ME in the PMBEC matrix, one could set consolidate to true, and
+        pass in the residues that are impacted by 2ME, which in this case would be cysteine.
+
+        :param: raw_data_dict - dict(<str<int<str:float>>>) explicitly <residue<position<allele:IC50>>>
+                consolidate - default False - flag to signal consolidation be called
+                residues_to_consolidate - default empty set - set of residues that parameters in raw data are being consolidated on
+                consolidate_on - default None - a str of the parameter that is being consolidated on in the raw dataset
+                skip_residues - default empty set - a set of residue strings to skip
+                skip_alleles - default None - a string that describes the allele to be skipped
+                positions - default empty set - a set of positions that describe the positions to be kept.
+                                                if empty set, all positions found will be kept.
+        :return: filtered raw_data_dict <str<int<str:float>>> explicitly <residue<position<allele:IC50>>>
+        '''
         if consolidate: # check to consolidate any parameters in raw data
-            raw_data_dict = self.consolidate_dataset(raw_data_dict)
+            if not consolidate_on:
+                raise Exception("you must pass in a parameter found in the raw data to consolidate on")
+            if len(residues_to_consolidate) == 0:
+                print('WARNING: you have not passed in any residues to consolidate on, pass in a set of residues that the parameter impacts')
+            raw_data_dict = self.consolidate_dataset(raw_data_dict, residues=residues_to_consolidate, consolidate_on=consolidate_on)
         if len(skip_residues) > 0: # check to see if any residues are being filtered out
             raw_data_dict = self.remove_skip_residues(raw_data_dict, skip_residues)
-        if skip_alleles: # filter out any alleles
-            new_rd = {}
-            new_rd = defaultdict()
-            for r in raw_data_dict.keys():
-                new_rd[r] = defaultdict(int)
-                for pos in raw_data_dict[r].keys():
-                    new_rd[r][pos] = {}
-                    for allele in raw_data_dict[r][pos].keys():
-                        if allele.find(skip_alleles) == -1:
-                            new_rd[r][pos][allele] = raw_data_dict[r][pos][allele]
-                        else:
-                            if allele in self.mhcs:
-                                self.mhcs.remove(allele)
-            raw_data_dict = new_rd
         if len(positions) > 0: #filter out any positions
             self.number_positions = len(positions)
             new_rd = {}
@@ -242,10 +256,27 @@ class pmbec_generator():
             raw_data_dict = new_rd
         else:
             self.number_positions = 9
+        if skip_alleles: # filter out any alleles
+            if not isinstance(skip_alleles, str):
+                raise Exception('Improper type, skip_alleles should be a string that describes the alleles to be skipped')
+            new_rd = {}
+            new_rd = defaultdict()
+            for r in raw_data_dict.keys():
+                new_rd[r] = defaultdict(int)
+                for pos in raw_data_dict[r].keys():
+                    new_rd[r][pos] = {}
+                    for allele in raw_data_dict[r][pos].keys():
+                        if allele.find(skip_alleles) == -1:
+                            new_rd[r][pos][allele] = raw_data_dict[r][pos][allele]
+                        else:
+                            if allele in self.mhcs:
+                                self.mhcs.remove(allele)
+            raw_data_dict = new_rd
         self.raw_data = raw_data_dict
         self.raw_data_file = os.getcwd() + '/' + self.job_id + '/' + self.job_id + '_filtered_raw_data.csv'
         self.write_intermediate_file(self.raw_data, self.raw_data_file)
         self.filtered = True
+        return raw_data_dict
 
     def get_raw_data(self, 
                     raw_data_file, 
@@ -348,7 +379,7 @@ class pmbec_generator():
         filter_data() with the parameters wanted. If it is not called the energy contribution will be calculated with
         the raw data as is. There is a parameter for raw_data to be calculated if a user does not want to read in the raw_data.
         
-        :param: raw_data - dict<str<int<str : float>>>) -  default None - if a user does not want the filtered raw data to be calculated on
+        :param: raw_data - dict(<str<int<str : float>>>) -  default None - if a user does not want the filtered raw data to be calculated on
                                                                           they can pass in a dictionary of <residue<position<MHC alleles : IC50>>>
         
         :return: energy contribution dictonary of <str<int<str : float>>> or in other words <residue<position<MHC alleles : relative binding affinity>>>
@@ -371,8 +402,8 @@ class pmbec_generator():
                 energy_contribution_dict[r][pos] = defaultdict(dict)
                 for mhc in raw_data_dict[r][pos].keys():
                     energy_contribution_dict[r][pos][mhc] = self.energy_cont(r, pos, mhc, raw_data_dict)
-        self.energy_constribution_file = os.getcwd() + '/' + self.job_id + '/' + self.job_id + '_energy_contribution.csv'
-        self.write_intermediate_file(energy_contribution_dict, self.energy_constribution_file)
+        self.energy_contribution_file = os.getcwd() + '/' + self.job_id + '/' + self.job_id + '_energy_contribution.csv'
+        self.write_intermediate_file(energy_contribution_dict, self.energy_contribution_file)
         return energy_contribution_dict
 
     def cov(self, x, y, population_covariance=True):
@@ -382,8 +413,11 @@ class pmbec_generator():
             covariance = np.cov(x, y)[0][1]
         return covariance
     
-    def covariance(self, population_covariance=True):
-        energy_contribution_df = self.read_intermediate_file(self.energy_constribution_file, return_dataframe=True)
+    def covariance(self, population_covariance=True, raw_data=None):
+        if not self.energy_contribution_file:
+            print('covariance() called before calling calculate_energy_contribution()\ncalculating energy contribution now')
+            self.calculate_energy_contribution(raw_data=raw_data)
+        energy_contribution_df = self.read_intermediate_file(self.energy_contribution_file, return_dataframe=True)
         covariance_dict = {}
         for residue in self.residues:
             covariance_dict[residue] = {}
