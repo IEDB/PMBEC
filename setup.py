@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="pmbec",
+    name="pmbec-jacobdp",
     version="0.0.1",
     author="Jacob Doering-Powell",
     author_email="jacobdoeringpowell@gmail.com",
@@ -15,7 +15,7 @@ setuptools.setup(
     url='https://github.com/IEDB/PMBEC',
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: Non-Profit Open Software License 3.0 (NPOSL-3.0)",
+        "License :: OSI Approved",
         "Operating System :: Unix",
     ],
     package_data={
