@@ -30,9 +30,10 @@ setuptools.setup(
         'numpy',
         'matplotlib',
         'openpyxl',
+        'Jinja2',
         'seaborn',
-        'sklearn',
+        'scikit-learn',
         'scipy'
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.7',
 )
