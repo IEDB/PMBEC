@@ -18,7 +18,7 @@ class pmbec_generator():
     to MHC binding algorithms. 
 
     :Example usage:
-    import pmbec_generator
+    from pmbec.pmbec_generator import pmbec_generator
 
     pm = pmbec_generator(job_id='pmbec_matrix', threshold=.05)
     raw_data = pm.get_raw_data("raw_data_file",
@@ -57,10 +57,17 @@ class pmbec_generator():
         self.energy_contribution_file = None
         self.raw_data_file = None
 
-    def load_true_matrix(self, true_matrix_file='./true_matrix/covariance_matrix.mat', sep=' '):
+    def true_matrix(self):
+        try:
+            import importlib.resources as pkg_resources
+        except ImportError:
+            # Try backported to PY<37 `importlib_resources`.
+            import importlib_resources as pkg_resources
+        from . import true_matrix
         index = "A C D E F G H I K L M N P Q R S T V W Y"
         index = index.split(" ")
-        initial_matrix = pd.read_csv(true_matrix_file, sep=sep,header=0,index_col=0)
+        data = pkg_resources.open_text(true_matrix, 'covariance_matrix.mat')
+        initial_matrix = pd.read_csv(data, sep=' ',header=0,index_col=0)
         new_columns = {"Unnamed: 0": "A",
                 "A": "C",
                 "C": "D",
