@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pmbec",
-    version="0.0.1",
+    version="0.0.2",
     author="Jacob Doering-Powell",
     author_email="jacobdoeringpowell@gmail.com",
     description="creates, visualizes, and exports peptide to MHC binding energy covariance (pmbec) matrices",
@@ -32,7 +32,6 @@ setuptools.setup(
         'openpyxl',
         'Jinja2',
         'seaborn',
-        'scikit-learn',
         'scipy'
     ],
     python_requires='>=3.7',

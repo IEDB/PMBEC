@@ -1,9 +1,7 @@
-from sklearn.cluster import AgglomerativeClustering
 import pandas as pd
 import numpy as np
 from collections import defaultdict
 import seaborn as sns
-import re
 from scipy.cluster.hierarchy import dendrogram, linkage
 import scipy.spatial as sp
 from matplotlib import pyplot as plt
